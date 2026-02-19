@@ -15,7 +15,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const $offlineCount = document.getElementById('offline-count');
     const $lastUpdate = document.getElementById('last-update');
 
+    // 新增：系统状态相关的DOM元素
+    const $systemContainer = document.getElementById('system-status-container');
+    const $systemTotal = document.getElementById('system-total');
+    const $systemUp = document.getElementById('system-up');
+    const $systemDown = document.getElementById('system-down');
+
     let streamers = [];
+    let systemMonitors = [];
     let isRefreshing = false;
     const Notify = new AuraNotify();
 
@@ -52,37 +59,104 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // 获取主播UID列表
-    async function loadStreamersData() {
+    // 获取配置数据（包含主播UID和系统监控ID）
+    async function loadConfigData() {
         try {
             const response = await fetch(`/data.json?_t=${Date.now()}`);
             if (!response.ok) {
-                throw new Error(`加载数据失败: ${response.status}`);
+                throw new Error(`加载配置失败: ${response.status}`);
             }
-            const data = await response.json();
+            const config = await response.json();
 
-            if (!Array.isArray(data)) {
-                throw new Error('数据格式错误，应为数组');
+            // 验证主播UID数据
+            if (!Array.isArray(config.mid)) {
+                throw new Error('主播UID数据格式错误');
             }
 
-            const validUids = data.filter(uid => {
+            // 验证系统监控ID数据
+            if (!Array.isArray(config.monitorsid)) {
+                throw new Error('系统监控ID数据格式错误');
+            }
+
+            // 验证API密钥
+            if (!config.readonlyuptimerobotapikey) {
+                throw new Error('UptimeRobot API密钥不存在');
+            }
+
+            const validUids = config.mid.filter(uid => {
                 return typeof uid === 'string' && /^\d+$/.test(uid);
             });
 
-            if (validUids.length === 0) {
-                throw new Error('未找到有效的UID数据');
+            const validMonitorIds = config.monitorsid.filter(id => {
+                return typeof id === 'string' && /^\d+$/.test(id);
+            });
+
+            console.log(`加载了 ${validUids.length} 个有效UID, ${validMonitorIds.length} 个系统监控ID`);
+            
+            return {
+                mids: validUids,
+                monitorIds: validMonitorIds,
+                apiKey: config.readonlyuptimerobotapikey
+            };
+        } catch (err) {
+            console.error('加载配置失败:', err);
+            Notify.error(`加载配置失败: ${err.message}`, "配置加载");
+            return {
+                mids: [],
+                monitorIds: [],
+                apiKey: ''
+            };
+        }
+    }
+
+    // 获取系统监控状态 - 使用批量查询接口
+    async function fetchSystemStatus(monitorIds, apiKey) {
+        if (!monitorIds.length || !apiKey) return [];
+
+        try {
+            // 使用批量查询接口 /v3/monitors
+            const response = await fetch('https://api.uptimerobot.com/v3/monitors', {
+                method: 'GET',  // 这里是 GET 请求
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`API错误: ${response.status}`);
             }
 
-            console.log(`加载了 ${validUids.length} 个有效UID`);
-            return validUids;
+            const data = await response.json();
+
+            // 从返回的 monitors 数组中过滤出我们需要的 ID
+            if (data && Array.isArray(data.monitors)) {
+                const filteredMonitors = data.monitors
+                    .filter(monitor => monitorIds.includes(monitor.id.toString()))
+                    .map(monitor => ({
+                        id: monitor.id,
+                        name: monitor.friendlyName,
+                        url: monitor.url,
+                        status: monitor.status,
+                        type: monitor.type,
+                        interval: monitor.interval,
+                        duration: monitor.currentStateDuration,
+                        createTime: monitor.createDateTime
+                    }));
+
+                console.log(`批量获取到 ${filteredMonitors.length} 个系统监控状态`);
+                return filteredMonitors;
+            }
+
+            return [];
         } catch (err) {
-            console.error('加载UID数据失败:', err);
-            Notify.error(`加载UID数据失败: ${err.message}`, "数据加载");
+            console.error('获取系统状态失败:', err);
+            Notify.error(`获取系统状态失败: ${err.message}`, "系统监控");
             return [];
         }
     }
 
-    // 获取直播状态 - 修改API地址
+    // 获取直播状态
     async function fetchLiveStatus(uids) {
         try {
             const response = await fetch('https://api.silvertideproject.top/api/v1/live', {
@@ -111,7 +185,71 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // 合并主播数据和直播状态
+    // 渲染系统状态卡片
+    function renderSystemStatus(monitors) {
+        if (!$systemContainer) return;
+
+        if (!monitors.length) {
+            $systemContainer.innerHTML = '<div class="system-card offline">暂无系统监控数据</div>';
+            return;
+        }
+
+        const statusMap = {
+            'UP': { class: 'up', text: '正常', icon: '✅' },
+            'DOWN': { class: 'down', text: '故障', icon: '❌' },
+            'PAUSED': { class: 'paused', text: '暂停', icon: '⏸️' },
+            'MAINTENANCE': { class: 'maintenance', text: '维护', icon: '🔧' }
+        };
+
+        const systemHtml = monitors.map(monitor => {
+            const status = statusMap[monitor.status] || { class: 'unknown', text: monitor.status, icon: '❓' };
+            const duration = monitor.duration;
+            const durationText = duration < 60 ? `${duration}秒` :
+                                duration < 3600 ? `${Math.floor(duration/60)}分钟` :
+                                `${Math.floor(duration/3600)}小时`;
+
+            return `
+                <div class="system-card ${status.class}" data-id="${monitor.id}">
+                    <div class="system-header">
+                        <span class="system-name">${monitor.name}</span>
+                        <span class="system-status status-${status.class}">
+                            ${status.icon} ${status.text}
+                        </span>
+                    </div>
+                    <div class="system-body">
+                        <div class="system-url">
+                            <a href="${monitor.url}" target="_blank" rel="noopener noreferrer">
+                                ${monitor.url.replace(/^https?:\/\//, '')}
+                            </a>
+                        </div>
+                        <div class="system-stats">
+                            <span class="system-stat">
+                                <span class="stat-label">类型</span>
+                                <span class="stat-value">${monitor.type}</span>
+                            </span>
+                            <span class="system-stat">
+                                <span class="stat-label">间隔</span>
+                                <span class="stat-value">${monitor.interval}秒</span>
+                            </span>
+                            <span class="system-stat">
+                                <span class="stat-label">持续</span>
+                                <span class="stat-value">${durationText}</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        $systemContainer.innerHTML = systemHtml;
+
+        // 更新系统统计
+        if ($systemTotal) $systemTotal.textContent = monitors.length;
+        if ($systemUp) $systemUp.textContent = monitors.filter(m => m.status === 'UP').length;
+        if ($systemDown) $systemDown.textContent = monitors.filter(m => m.status !== 'UP').length;
+    }
+
+    // 合并数据获取
     async function fetchData() {
         if (isRefreshing) return;
 
@@ -121,18 +259,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateConnectionStatus(0);
 
         try {
-            const uids = await loadStreamersData();
+            const config = await loadConfigData();
 
-            if (uids.length === 0) {
-                throw new Error('未找到主播UID数据');
+            if (config.mids.length === 0 && config.monitorIds.length === 0) {
+                throw new Error('未找到任何监控数据');
             }
 
-            console.log(`获取到 ${uids.length} 个主播UID:`, uids);
+            // 并行获取直播数据和系统监控数据
+            const [liveStatus, systemMonitorsData] = await Promise.all([
+                fetchLiveStatus(config.mids),
+                fetchSystemStatus(config.monitorIds, config.apiKey)
+            ]);
 
-            const liveStatus = await fetchLiveStatus(uids);
-
+            // 处理直播数据
             streamers = [];
-
             Object.keys(liveStatus).forEach(uid => {
                 const status = liveStatus[uid];
                 if (status) {
@@ -149,15 +289,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             });
 
-            console.log(`成功获取 ${streamers.length} 个主播的直播状态`);
+            // 处理系统监控数据
+            systemMonitors = systemMonitorsData;
 
+            console.log(`成功获取 ${streamers.length} 个主播状态, ${systemMonitors.length} 个系统状态`);
+
+            // 更新UI
             filterStreamers();
+            renderSystemStatus(systemMonitors);
             updateStats();
             updateConnectionStatus(1);
 
             $lastUpdate.textContent = new Date().toLocaleString('zh-CN');
 
-            Notify.success(`数据更新成功 (${streamers.length}位主播)`, "数据更新", {
+            Notify.success(`数据更新成功 (${streamers.length}位主播, ${systemMonitors.length}个服务)`, "数据更新", {
                 duration: 3000
             });
         } catch (err) {
@@ -214,7 +359,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             $container.innerHTML = '';
 
             if (filteredStreamers.length === 0) {
-                $container.innerHTML = '<p class="no-results">没有找到匹配的主主播</p>';
+                $container.innerHTML = '<p class="no-results">没有找到匹配的主播</p>';
                 return;
             }
 
