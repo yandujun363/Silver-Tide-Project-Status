@@ -114,9 +114,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!monitorIds.length || !apiKey) return [];
 
         try {
-            // 使用批量查询接口 /v3/monitors
-            const response = await fetch('https://api.uptimerobot.com/v3/monitors', {
-                method: 'GET',  // 这里是 GET 请求
+            // 单次请求获取所有监控器
+            const response = await fetch('https://api.uptimerobot.com/v3/monitors?limit=200', {
                 headers: {
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
@@ -127,11 +126,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 throw new Error(`API错误: ${response.status}`);
             }
 
-            const data = await response.json();
-
-            // 从返回的 monitors 数组中过滤出我们需要的 ID
-            if (data && Array.isArray(data.monitors)) {
-                const filteredMonitors = data.monitors
+            const responseData = await response.json();
+            console.log('API返回原始数据:', responseData); // 调试用
+            
+            // 适配返回结构：数据在 responseData.data 中
+            if (responseData && Array.isArray(responseData.data)) {
+                // 过滤出需要的监控器
+                const filteredMonitors = responseData.data
                     .filter(monitor => monitorIds.includes(monitor.id.toString()))
                     .map(monitor => ({
                         id: monitor.id,
@@ -148,6 +149,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return filteredMonitors;
             }
 
+            console.warn('API返回数据格式异常:', responseData);
             return [];
         } catch (err) {
             console.error('获取系统状态失败:', err);
