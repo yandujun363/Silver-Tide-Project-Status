@@ -3,6 +3,145 @@ import AuraNotify from "/js/AuraNotify.js";
 let keyframePreview = null;
 let currentPreviewStreamer = null;
 
+// IndexedDB 缓存管理类
+class StatusCache {
+    constructor(dbName = 'StatusCache', storeName = 'monitors') {
+        this.dbName = dbName;
+        this.storeName = storeName;
+        this.db = null;
+        this.CACHE_KEY = 'system_monitors';
+        this.CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
+    }
+
+    // 初始化数据库
+    async init() {
+        if (this.db) return this.db;
+
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, 1);
+
+            request.onerror = () => {
+                console.error('IndexedDB 打开失败');
+                reject(request.error);
+            };
+
+            request.onsuccess = () => {
+                this.db = request.result;
+                resolve(this.db);
+            };
+
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(this.storeName)) {
+                    // 创建对象仓库，使用时间戳作为索引
+                    const store = db.createObjectStore(this.storeName, { keyPath: 'id' });
+                    store.createIndex('timestamp', 'timestamp', { unique: false });
+                }
+            };
+        });
+    }
+
+    // 保存数据到缓存
+    async set(data) {
+        try {
+            await this.init();
+            
+            const transaction = this.db.transaction([this.storeName], 'readwrite');
+            const store = transaction.objectStore(this.storeName);
+            
+            const cacheItem = {
+                id: this.CACHE_KEY,
+                data: data,
+                timestamp: Date.now()
+            };
+            
+            return new Promise((resolve, reject) => {
+                const request = store.put(cacheItem);
+                request.onsuccess = () => resolve(true);
+                request.onerror = () => reject(request.error);
+            });
+        } catch (err) {
+            console.error('缓存保存失败:', err);
+            return false;
+        }
+    }
+
+    // 获取缓存数据
+    async get() {
+        try {
+            await this.init();
+            
+            const transaction = this.db.transaction([this.storeName], 'readonly');
+            const store = transaction.objectStore(this.storeName);
+            
+            return new Promise((resolve) => {
+                const request = store.get(this.CACHE_KEY);
+                
+                request.onsuccess = () => {
+                    const cacheItem = request.result;
+                    
+                    // 检查缓存是否存在且未过期
+                    if (cacheItem && cacheItem.data) {
+                        const age = Date.now() - cacheItem.timestamp;
+                        if (age < this.CACHE_DURATION) {
+                            console.log(`使用缓存数据 (${Math.round(age/1000)}秒前)`);
+                            resolve(cacheItem.data);
+                        } else {
+                            console.log('缓存已过期');
+                            resolve(null);
+                        }
+                    } else {
+                        resolve(null);
+                    }
+                };
+                
+                request.onerror = () => {
+                    console.error('缓存读取失败');
+                    resolve(null);
+                };
+            });
+        } catch (err) {
+            console.error('缓存读取失败:', err);
+            return null;
+        }
+    }
+
+    // 清除过期缓存（可选）
+    async clearExpired() {
+        try {
+            await this.init();
+            
+            const transaction = this.db.transaction([this.storeName], 'readwrite');
+            const store = transaction.objectStore(this.storeName);
+            const index = store.index('timestamp');
+            
+            const now = Date.now();
+            const expiryTime = now - this.CACHE_DURATION;
+            
+            const range = IDBKeyRange.upperBound(expiryTime);
+            
+            return new Promise((resolve) => {
+                const request = index.openCursor(range);
+                
+                request.onsuccess = (event) => {
+                    const cursor = event.target.result;
+                    if (cursor) {
+                        store.delete(cursor.primaryKey);
+                        cursor.continue();
+                    } else {
+                        resolve(true);
+                    }
+                };
+                
+                request.onerror = () => resolve(false);
+            });
+        } catch (err) {
+            console.error('清除过期缓存失败:', err);
+            return false;
+        }
+    }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     const $container = document.querySelector('.streamers-container');
     const $search = document.getElementById('search');
@@ -15,7 +154,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const $offlineCount = document.getElementById('offline-count');
     const $lastUpdate = document.getElementById('last-update');
 
-    // 新增：系统状态相关的DOM元素
+    // 系统状态相关的DOM元素
     const $systemContainer = document.getElementById('system-status-container');
     const $systemTotal = document.getElementById('system-total');
     const $systemUp = document.getElementById('system-up');
@@ -25,6 +164,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     let systemMonitors = [];
     let isRefreshing = false;
     const Notify = new AuraNotify();
+    
+    // 初始化缓存
+    const statusCache = new StatusCache();
+    
+    // API请求节流控制
+    const API_THROTTLE = {
+        lastRequestTime: 0,
+        minInterval: 6000, // 6秒最小间隔（每分钟最多10次）
+        requestCount: 0,
+        resetTime: Date.now() + 60000
+    };
 
     // 排序配置
     const sortOptions = {
@@ -35,6 +185,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     let currentSort = "live_desc";
+
+    // 检查是否可以发送API请求（限流控制）
+    function canMakeRequest() {
+        const now = Date.now();
+        
+        // 重置计数器（每分钟）
+        if (now >= API_THROTTLE.resetTime) {
+            API_THROTTLE.requestCount = 0;
+            API_THROTTLE.resetTime = now + 60000;
+            API_THROTTLE.lastRequestTime = 0;
+            return true;
+        }
+        
+        // 检查是否超过每分钟限制
+        if (API_THROTTLE.requestCount >= 10) {
+            console.warn('API请求已达到每分钟上限');
+            return false;
+        }
+        
+        // 检查请求间隔
+        if (now - API_THROTTLE.lastRequestTime < API_THROTTLE.minInterval) {
+            console.log('请求间隔太短，稍后再试');
+            return false;
+        }
+        
+        return true;
+    }
+
+    // 记录API请求
+    function recordRequest() {
+        API_THROTTLE.lastRequestTime = Date.now();
+        API_THROTTLE.requestCount++;
+        console.log(`API请求次数: ${API_THROTTLE.requestCount}/10 (重置于 ${new Date(API_THROTTLE.resetTime).toLocaleTimeString()})`);
+    }
 
     // 更新连接状态
     function updateConnectionStatus(status) {
@@ -59,7 +243,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // 获取配置数据（包含主播UID和系统监控ID）
+    // 获取配置数据
     async function loadConfigData() {
         try {
             const response = await fetch(`/data.json?_t=${Date.now()}`);
@@ -68,17 +252,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             const config = await response.json();
 
-            // 验证主播UID数据
             if (!Array.isArray(config.mid)) {
                 throw new Error('主播UID数据格式错误');
             }
-
-            // 验证系统监控ID数据
             if (!Array.isArray(config.monitorsid)) {
                 throw new Error('系统监控ID数据格式错误');
             }
-
-            // 验证API密钥
             if (!config.readonlyuptimerobotapikey) {
                 throw new Error('UptimeRobot API密钥不存在');
             }
@@ -109,12 +288,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // 获取系统监控状态 - 使用批量查询接口
+    // 获取系统监控状态 - 带缓存和限流
     async function fetchSystemStatus(monitorIds, apiKey) {
         if (!monitorIds.length || !apiKey) return [];
 
         try {
-            // 单次请求获取所有监控器
+            // 1. 先尝试读取缓存
+            const cachedData = await statusCache.get();
+            if (cachedData) {
+                console.log('使用缓存的系统状态数据');
+                return cachedData;
+            }
+
+            // 2. 检查限流
+            if (!canMakeRequest()) {
+                console.warn('API请求被限流，返回空数据');
+                Notify.warning('API请求频繁，使用最后缓存', '限流提示');
+                return [];
+            }
+
+            // 3. 发起API请求
+            console.log('发起UptimeRobot API请求...');
             const response = await fetch('https://api.uptimerobot.com/v3/monitors?limit=200', {
                 headers: {
                     'Authorization': `Bearer ${apiKey}`,
@@ -122,39 +316,62 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             });
 
+            recordRequest(); // 记录这次请求
+
             if (!response.ok) {
                 throw new Error(`API错误: ${response.status}`);
             }
 
-            const responseData = await response.json();
-            console.log('API返回原始数据:', responseData); // 调试用
+            const { data } = await response.json();
             
-            // 适配返回结构：数据在 responseData.data 中
-            if (responseData && Array.isArray(responseData.data)) {
-                // 过滤出需要的监控器
-                const filteredMonitors = responseData.data
-                    .filter(monitor => monitorIds.includes(monitor.id.toString()))
-                    .map(monitor => ({
-                        id: monitor.id,
-                        name: monitor.friendlyName,
-                        url: monitor.url,
-                        status: monitor.status,
-                        type: monitor.type,
-                        interval: monitor.interval,
-                        duration: monitor.currentStateDuration,
-                        createTime: monitor.createDateTime
+            if (Array.isArray(data)) {
+                const filteredData = data
+                    .filter(m => monitorIds.includes(m.id.toString()))
+                    .map(m => ({
+                        id: m.id,
+                        name: m.friendlyName,
+                        url: m.url,
+                        status: m.status,
+                        type: m.type,
+                        interval: m.interval,
+                        duration: m.currentStateDuration,
+                        createTime: m.createDateTime
                     }));
 
-                console.log(`批量获取到 ${filteredMonitors.length} 个系统监控状态`);
-                return filteredMonitors;
-            }
+                // 4. 保存到缓存
+                await statusCache.set(filteredData);
+                console.log(`获取到 ${filteredData.length} 个系统监控状态并已缓存`);
 
-            console.warn('API返回数据格式异常:', responseData);
+                return filteredData;
+            }
+            
             return [];
         } catch (err) {
             console.error('获取系统状态失败:', err);
-            Notify.error(`获取系统状态失败: ${err.message}`, "系统监控");
-            return [];
+            
+            // 5. 出错时尝试读取缓存（即使过期也读）
+            try {
+                await statusCache.init();
+                const transaction = statusCache.db.transaction([statusCache.storeName], 'readonly');
+                const store = transaction.objectStore(statusCache.storeName);
+                
+                return new Promise((resolve) => {
+                    const request = store.get(statusCache.CACHE_KEY);
+                    request.onsuccess = () => {
+                        if (request.result) {
+                            console.log('API失败，使用过期缓存');
+                            Notify.warning('使用缓存数据（API暂时不可用）', '降级提示');
+                            resolve(request.result.data);
+                        } else {
+                            resolve([]);
+                        }
+                    };
+                    request.onerror = () => resolve([]);
+                });
+            } catch (cacheErr) {
+                console.error('读取缓存失败:', cacheErr);
+                return [];
+            }
         }
     }
 
@@ -251,8 +468,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if ($systemDown) $systemDown.textContent = monitors.filter(m => m.status !== 'UP').length;
     }
 
-    // 合并数据获取
-    async function fetchData() {
+    // 合并数据获取（带缓存）
+    async function fetchData(forceRefresh = false) {
         if (isRefreshing) return;
 
         isRefreshing = true;
@@ -265,6 +482,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             if (config.mids.length === 0 && config.monitorIds.length === 0) {
                 throw new Error('未找到任何监控数据');
+            }
+
+            // 如果强制刷新，清除系统状态缓存
+            if (forceRefresh) {
+                await statusCache.set([]); // 清空缓存
+                console.log('强制刷新，已清除缓存');
             }
 
             // 并行获取直播数据和系统监控数据
@@ -302,7 +525,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             updateStats();
             updateConnectionStatus(1);
 
-            $lastUpdate.textContent = new Date().toLocaleString('zh-CN');
+            const now = new Date();
+            $lastUpdate.textContent = now.toLocaleString('zh-CN');
+
+            // 显示缓存状态
+            const cacheAge = await getCacheAge();
+            if (cacheAge > 0) {
+                Notify.info(`数据已缓存 (${Math.round(cacheAge/1000)}秒前更新)`, "缓存提示", {
+                    duration: 2000
+                });
+            }
 
             Notify.success(`数据更新成功 (${streamers.length}位主播, ${systemMonitors.length}个服务)`, "数据更新", {
                 duration: 3000
@@ -314,6 +546,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         } finally {
             isRefreshing = false;
             $refreshBtn.querySelector("svg").classList.remove("refreshing");
+        }
+    }
+
+    // 获取缓存年龄（用于显示）
+    async function getCacheAge() {
+        try {
+            await statusCache.init();
+            const transaction = statusCache.db.transaction([statusCache.storeName], 'readonly');
+            const store = transaction.objectStore(statusCache.storeName);
+            
+            return new Promise((resolve) => {
+                const request = store.get(statusCache.CACHE_KEY);
+                request.onsuccess = () => {
+                    if (request.result) {
+                        resolve(Date.now() - request.result.timestamp);
+                    } else {
+                        resolve(0);
+                    }
+                };
+                request.onerror = () => resolve(0);
+            });
+        } catch {
+            return 0;
         }
     }
 
@@ -609,9 +864,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             console.log("开始初始化数据获取...");
             updateConnectionStatus(0);
-            fetchData();
+            
+            // 首次加载，尝试使用缓存
+            fetchData(false);
 
-            setInterval(fetchData, 5 * 60 * 1000);
+            // 设置定时器，每5分钟刷新（但会先检查缓存）
+            setInterval(() => fetchData(false), 5 * 60 * 1000);
         } catch (err) {
             console.error("初始化数据获取时出错:", err);
             Notify.error(`初始化失败: ${err.message}`, "初始化错误");
@@ -626,7 +884,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentSort = this.value;
         filterStreamers();
     });
-    document.getElementById('refresh-btn').addEventListener('click', fetchData);
+    
+    // 刷新按钮 - 强制刷新（跳过缓存）
+    document.getElementById('refresh-btn').addEventListener('click', () => fetchData(true));
 
     // 初始化
     try {
