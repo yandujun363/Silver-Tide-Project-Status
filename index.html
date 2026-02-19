@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>银潮状态面板 · 直播监控 | Silver Tide Project</title>
+  <meta name="description" content="银潮项目旗下主播直播状态实时监控面板" />
+  <meta name="keywords" content="银潮项目,Silver Tide Project,直播状态,直播监控,Bilibili直播" />
+  <link rel="stylesheet" href="/css/index.css" />
+  <link rel="stylesheet" href="/css/AuraNotify.css" />
+  <link rel="icon" href="/favicon.jpg" />
+
+  <!-- Open Graph 元标签 -->
+  <meta property="og:title" content="银潮状态面板 · 直播监控" />
+  <meta property="og:description" content="银潮项目旗下主播直播状态实时监控" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://live.silvertideproject.top" />
+  <meta property="og:image" content="https://www.silvertideproject.top/favicon.jpg" />
+
+  <!-- Canonical URL -->
+  <link rel="canonical" href="https://live.silvertideproject.top" />
+  
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "银潮状态面板 - 直播监控",
+      "description": "银潮项目旗下主播直播状态实时监控面板",
+      "url": "https://live.silvertideproject.top"
+    }
+  </script>
+</head>
+
+<body>
+  <!-- 导航栏 -->
+  <nav class="navbar">
+    <div class="logo">Silver Tide · Live</div>
+    <div class="nav-links">
+      <a href="#about">关于面板</a>
+      <a href="https://www.silvertideproject.top" target="_blank">银潮官网</a>
+      <a href="https://space.bilibili.com/3546978543732757" target="_blank">联系我们</a>
+    </div>
+    <div class="connection-status">
+      <span class="status-dot"></span>
+      <span class="status-text">数据加载中...</span>
+    </div>
+  </nav>
+
+  <!-- 主视觉区域 -->
+  <section class="hero">
+    <h1 class="main-title">银潮状态面板</h1>
+    <p class="subtitle">
+      实时监控银潮项目旗下主播的直播动态<br />数据每5分钟自动刷新
+    </p>
+  </section>
+
+  <main>
+    <div class="filters">
+      <input type="text" id="search" placeholder="搜索主播..." aria-label="搜索主播" />
+      <select id="status-filter" aria-label="按状态筛选">
+        <option value="all">全部状态</option>
+        <option value="living">正在直播</option>
+        <option value="offline">未直播</option>
+      </select>
+      <select id="sort-order">
+        <option value="name_asc">名称A-Z</option>
+        <option value="name_desc">名称Z-A</option>
+        <option value="live_desc" selected>直播优先</option>
+        <option value="live_asc">未直播优先</option>
+      </select>
+      <button id="refresh-btn" title="刷新数据" aria-label="刷新数据">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+          <path d="M3 3v5h5"></path>
+          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+          <path d="M16 16h5v5"></path>
+        </svg>
+      </button>
+    </div>
+
+    <div class="stats-bar">
+      <span>主播总数: <span id="total-count">0</span></span>
+      <span>正在直播: <span id="live-count">0</span></span>
+      <span>未直播: <span id="offline-count">0</span></span>
+    </div>
+
+    <div class="streamers-container"></div>
+  </main>
+
+  <div id="aura-notice" class="aura-notice-container"></div>
+
+  <!-- 关于面板 -->
+  <section class="container" id="about">
+    <h2 class="section-title">关于面板</h2>
+    <div class="about-text">
+      <p>
+        <strong>银潮状态面板</strong> 是银潮项目官方出品的实时直播监控工具。
+        旨在为观众提供最及时的直播动态，不错过任何一场精彩内容。
+      </p>
+      <p>
+        · 数据每5分钟自动同步更新<br />
+        · 支持按状态筛选、名称排序<br />
+        · 鼠标悬停直播中主播头像可预览直播画面
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footer-links">
+      <a href="https://www.silvertideproject.top" target="_blank">银潮官网</a>
+      <a href="https://space.bilibili.com/3546978543732757" target="_blank">B站官方账号</a>
+    </div>
+    <p>© 2025 Silver Tide Project. 保留所有权利。</p>
+    <p>地址：北立交桥横一路307</p>
+    <p style="margin-top: 10px; font-size: 0.8rem;">最后更新: <span id="last-update">-</span></p>
+  </footer>
+
+  <script type="module" src="/js/index.js"></script>
+</body>
+</html>
