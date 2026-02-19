@@ -309,7 +309,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // 3. 发起API请求
             console.log('发起UptimeRobot API请求...');
-            const response = await fetch('https://api.uptimerobot.com/v3/monitors?limit=200', {
+            const response = await fetch('https://status-api.silvertideproject.top/v3/monitors?limit=200', {
                 headers: {
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
