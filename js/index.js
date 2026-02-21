@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // 获取配置数据（包含主播UID和系统监控ID）
+    // 获取配置数据（包含主播UID和系统监控域名）
     async function loadConfigData() {
         try {
             const response = await fetch(`/data.json?_t=${Date.now()}`);
@@ -73,9 +73,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 throw new Error('主播UID数据格式错误');
             }
 
-            // 验证系统监控ID数据
-            if (!Array.isArray(config.monitorsid)) {
-                throw new Error('系统监控ID数据格式错误');
+            // 验证系统监控域名配置
+            if (!config.domain || !Array.isArray(config.domain)) {
+                console.warn('域名配置不存在或格式错误');
             }
 
             // 验证API密钥
@@ -87,15 +87,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return typeof uid === 'string' && /^\d+$/.test(uid);
             });
 
-            const validMonitorIds = config.monitorsid.filter(id => {
-                return typeof id === 'string' && /^\d+$/.test(id);
-            });
-
-            console.log(`加载了 ${validUids.length} 个有效UID, ${validMonitorIds.length} 个系统监控ID`);
+            console.log(`加载了 ${validUids.length} 个有效UID`);
             
             return {
                 mids: validUids,
-                monitorIds: validMonitorIds,
+                domainPatterns: config.domain || [],
                 apiKey: config.readonlyuptimerobotapikey
             };
         } catch (err) {
@@ -103,15 +99,51 @@ document.addEventListener('DOMContentLoaded', async () => {
             Notify.error(`加载配置失败: ${err.message}`, "配置加载");
             return {
                 mids: [],
-                monitorIds: [],
+                domainPatterns: [],
                 apiKey: ''
             };
         }
     }
 
+    // 从URL提取主域名
+    function extractMainDomain(url) {
+        try {
+            if (!url) return '';
+            
+            // 移除协议
+            let domain = url.replace(/^https?:\/\//, '');
+            // 移除路径和参数
+            domain = domain.split('/')[0];
+            // 移除端口
+            domain = domain.split(':')[0];
+            
+            return domain.toLowerCase();
+        } catch (err) {
+            console.error('提取域名失败:', err);
+            return '';
+        }
+    }
+
+    // 检查域名是否匹配模式
+    function matchDomainPattern(domain, patterns) {
+        if (!domain || !patterns || !patterns.length) return false;
+        
+        return patterns.some(pattern => {
+            // 通配模式（以点开头）
+            if (pattern.startsWith('.')) {
+                const suffix = pattern.substring(1); // 去掉开头的点
+                return domain.endsWith(suffix) || domain === suffix;
+            }
+            // 完全匹配模式
+            else {
+                return domain === pattern;
+            }
+        });
+    }
+
     // 获取系统监控状态 - 使用批量查询接口
-    async function fetchSystemStatus(monitorIds, apiKey) {
-        if (!monitorIds.length || !apiKey) return [];
+    async function fetchSystemStatus(domainPatterns, apiKey) {
+        if (!apiKey) return [];
 
         try {
             // 单次请求获取所有监控器
@@ -132,21 +164,30 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 适配返回结构：数据在 responseData.data 中
             if (responseData && Array.isArray(responseData.data)) {
                 // 过滤出需要的监控器
-                const filteredMonitors = responseData.data
-                    .filter(monitor => monitorIds.includes(monitor.id.toString()))
-                    .map(monitor => ({
-                        id: monitor.id,
-                        name: monitor.friendlyName,
-                        url: monitor.url,
-                        status: monitor.status,
-                        type: monitor.type,
-                        interval: monitor.interval,
-                        duration: monitor.currentStateDuration,
-                        createTime: monitor.createDateTime
-                    }));
+                let filteredMonitors = responseData.data;
+                
+                // 如果有域名配置，按域名过滤
+                if (domainPatterns && domainPatterns.length > 0) {
+                    filteredMonitors = responseData.data.filter(monitor => {
+                        const domain = extractMainDomain(monitor.url);
+                        return matchDomainPattern(domain, domainPatterns);
+                    });
+                }
 
-                console.log(`批量获取到 ${filteredMonitors.length} 个系统监控状态`);
-                return filteredMonitors;
+                const mappedMonitors = filteredMonitors.map(monitor => ({
+                    id: monitor.id,
+                    name: monitor.friendlyName,
+                    url: monitor.url,
+                    domain: extractMainDomain(monitor.url),
+                    status: monitor.status,
+                    type: monitor.type,
+                    interval: monitor.interval,
+                    duration: monitor.currentStateDuration,
+                    createTime: monitor.createDateTime
+                }));
+
+                console.log(`批量获取到 ${mappedMonitors.length} 个系统监控状态`);
+                return mappedMonitors;
             }
 
             console.warn('API返回数据格式异常:', responseData);
@@ -263,14 +304,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const config = await loadConfigData();
 
-            if (config.mids.length === 0 && config.monitorIds.length === 0) {
+            if (config.mids.length === 0 && config.domainPatterns.length === 0) {
                 throw new Error('未找到任何监控数据');
             }
 
             // 并行获取直播数据和系统监控数据
             const [liveStatus, systemMonitorsData] = await Promise.all([
                 fetchLiveStatus(config.mids),
-                fetchSystemStatus(config.monitorIds, config.apiKey)
+                fetchSystemStatus(config.domainPatterns, config.apiKey)
             ]);
 
             // 处理直播数据
