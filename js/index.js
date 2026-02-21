@@ -261,7 +261,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     </div>
                     <div class="system-body">
                         <div class="system-url">
-                            <a href="${monitor.url}" target="_blank" rel="noopener noreferrer">
+                            <a href="${monitor.url}" target="_blank">
                                 ${monitor.url.replace(/^https?:\/\//, '')}
                             </a>
                         </div>
