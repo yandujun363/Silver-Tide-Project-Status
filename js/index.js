@@ -115,7 +115,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         try {
             // 单次请求获取所有监控器
-            const response = await fetch('https://api.uptimerobot.com/v3/monitors?limit=200', {
+            const response = await fetch('https://status-api.silvertideproject.top/v3/monitors?limit=200', {
                 headers: {
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'

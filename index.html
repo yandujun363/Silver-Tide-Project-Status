@@ -54,18 +54,6 @@
     </p>
   </section>
 
-    <!-- 系统状态监控区域 -->
-  <section class="system-section">
-    <div class="container">
-      <h2 class="section-title">系统服务状态</h2>
-      <div class="system-stats-bar">
-        <span>服务总数: <span id="system-total">0</span></span>
-        <span>正常: <span id="system-up">0</span></span>
-        <span>异常: <span id="system-down">0</span></span>
-      </div>
-      <div id="system-status-container" class="system-status-grid"></div>
-    </div>
-  </section>
 
   <main>
     <div class="filters">
@@ -92,6 +80,7 @@
       </button>
     </div>
 
+
     <div class="stats-bar">
       <span>主播总数: <span id="total-count">0</span></span>
       <span>正在直播: <span id="live-count">0</span></span>
@@ -103,18 +92,49 @@
 
   <div id="aura-notice" class="aura-notice-container"></div>
 
+    <!-- 系统状态监控区域 -->
+  <section class="system-section">
+    <div class="container">
+      <h2 class="section-title">系统服务状态</h2>
+      <div class="system-stats-bar">
+        <span>服务总数: <span id="system-total">0</span></span>
+        <span>正常: <span id="system-up">0</span></span>
+        <span>异常: <span id="system-down">0</span></span>
+      </div>
+      <div id="system-status-container" class="system-status-grid"></div>
+    </div>
+  </section>
+
   <!-- 关于面板 -->
   <section class="container" id="about">
     <h2 class="section-title">关于面板</h2>
     <div class="about-text">
       <p>
-        <strong>银潮状态面板</strong> 是银潮项目官方出品的实时直播监控工具。
-        旨在为观众提供最及时的直播动态，不错过任何一场精彩内容。
+        <strong>银潮状态面板</strong> 是银潮项目官方出品的实时监控工具，
+        同时提供<b>主播直播监控</b>与<b>系统服务监控</b>双重功能。
       </p>
-      <p>
-        · 数据每5分钟自动同步更新<br />
-        · 支持按状态筛选、名称排序<br />
-        · 鼠标悬停直播中主播头像可预览直播画面
+      <div style="display: flex; flex-wrap: wrap; gap: 2rem; margin-top: 1.5rem; text-align: left;">
+        <div style="flex: 1; min-width: 250px;">
+          <h3 style="color: #00e5ff; margin-bottom: 0.8rem;">直播监控</h3>
+          <ul style="list-style: none; padding: 0; color: #b0b0b0;">
+            <li style="margin-bottom: 0.5rem;">✓ 实时显示主播开播状态</li>
+            <li style="margin-bottom: 0.5rem;">✓ 支持按状态筛选、名称排序</li>
+            <li style="margin-bottom: 0.5rem;">✓ 鼠标悬停预览直播画面</li>
+            <li style="margin-bottom: 0.5rem;">✓ 一键跳转B站主页/直播间</li>
+          </ul>
+        </div>
+        <div style="flex: 1; min-width: 250px;">
+          <h3 style="color: #00ff95; margin-bottom: 0.8rem;">服务监控</h3>
+          <ul style="list-style: none; padding: 0; color: #b0b0b0;">
+            <li style="margin-bottom: 0.5rem;">✓ 实时监控API、Web、图片服务</li>
+            <li style="margin-bottom: 0.5rem;">✓ 服务状态一目了然（正常/异常）</li>
+            <li style="margin-bottom: 0.5rem;">✓ 显示服务类型、检查间隔</li>
+            <li style="margin-bottom: 0.5rem;">✓ 当前状态持续时长统计</li>
+          </ul>
+        </div>
+      </div>
+      <p style="margin-top: 1.5rem; font-size: 0.9rem; color: #88ccff;">
+        ⏱️ 数据每5分钟自动同步更新 · 使用 IndexedDB 本地缓存，避免API限流
       </p>
     </div>
   </section>
